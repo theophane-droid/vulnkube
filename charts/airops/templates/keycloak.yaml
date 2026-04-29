@@ -1,0 +1,126 @@
+{{- if .Values.keycloak.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "airops.fullname" . }}-keycloak-realm
+  labels:
+    {{- include "airops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: keycloak
+data:
+  airops-realm.json: |
+    {
+      "realm": {{ .Values.keycloak.realm | quote }},
+      "enabled": true,
+      "registrationAllowed": true,
+      "loginWithEmailAllowed": true,
+      "clients": [
+        {
+          "clientId": {{ .Values.keycloak.clientId | quote }},
+          "enabled": true,
+          "publicClient": true,
+          "directAccessGrantsEnabled": true,
+          "redirectUris": ["*"],
+          "webOrigins": ["*"]
+        }
+      ],
+      "users": [
+{{- range $index, $operator := .Values.lab.operators }}
+        {{- if $index }},{{ end }}
+        {
+          "username": {{ $operator.callsign | quote }},
+          "email": {{ $operator.email | quote }},
+          "firstName": {{ $operator.displayName | quote }},
+          "enabled": true,
+          "attributes": {
+            "callsign": [{{ $operator.callsign | quote }}],
+            "role": [{{ $operator.role | quote }}]
+          },
+          "credentials": [
+            {
+              "type": "password",
+              "value": {{ $operator.password | quote }},
+              "temporary": false
+            }
+          ]
+        }
+{{- end }}
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "airops.fullname" . }}-keycloak
+  labels:
+    {{- include "airops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: keycloak
+spec:
+  replicas: {{ .Values.keycloak.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "airops.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: keycloak
+  template:
+    metadata:
+      labels:
+        {{- include "airops.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: keycloak
+      annotations:
+        checksum/keycloak-realm: {{ toJson .Values.keycloak | sha256sum }}
+    spec:
+      containers:
+        - name: keycloak
+          image: "{{ .Values.keycloak.image.repository }}:{{ .Values.keycloak.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args:
+            - start-dev
+            - --http-port=8080
+            - --http-relative-path=/auth
+            - --import-realm
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: KEYCLOAK_ADMIN
+              value: {{ .Values.keycloak.admin.username | quote }}
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "airops.fullname" . }}-secrets
+                  key: keycloak-admin-password
+            - name: KC_PROXY_HEADERS
+              value: xforwarded
+            - name: KC_HTTP_ENABLED
+              value: "true"
+          volumeMounts:
+            - name: realm
+              mountPath: /opt/keycloak/data/import
+          readinessProbe:
+            httpGet:
+              path: /auth/realms/{{ .Values.keycloak.realm }}
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources.keycloak | nindent 12 }}
+      volumes:
+        - name: realm
+          configMap:
+            name: {{ include "airops.fullname" . }}-keycloak-realm
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "airops.fullname" . }}-keycloak
+  labels:
+    {{- include "airops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: keycloak
+spec:
+  selector:
+    {{- include "airops.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: keycloak
+  ports:
+    - name: http
+      port: {{ .Values.keycloak.service.port }}
+      targetPort: http
+{{- end }}

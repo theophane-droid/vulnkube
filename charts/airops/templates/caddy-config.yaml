@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "airops.fullname" . }}-caddy
+  labels:
+    {{- include "airops.labels" . | nindent 4 }}
+data:
+  Caddyfile: |
+    :80 {
+      encode zstd gzip
+
+      header {
+        X-Lab-Name "AirOps"
+      }
+
+      reverse_proxy /graphql* {{ include "airops.fullname" . }}-api:{{ .Values.api.service.port }}
+      reverse_proxy /api* {{ include "airops.fullname" . }}-api:{{ .Values.api.service.port }}
+      reverse_proxy /healthz {{ include "airops.fullname" . }}-api:{{ .Values.api.service.port }}
+      reverse_proxy /auth* {{ include "airops.fullname" . }}-keycloak:{{ .Values.keycloak.service.port }}
+      reverse_proxy /* {{ include "airops.fullname" . }}-frontend:{{ .Values.frontend.service.port }}
+    }

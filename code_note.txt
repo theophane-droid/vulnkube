@@ -1,0 +1,16 @@
+On veut créer une application pour tester plusieurs scénarios d'attaques web dans un environnement kube.
+
+Prépare donc un envinement prêt à installer en suivant les bonnes pratiques kube qui contiendra les applications suivantes :
+
+- pgsql
+- reddis pour le cache
+- graphql
+- frontend
+- caddy comme proxy
+- un frontend
+- bucket s3
+
+Prépare à l'intérieur de l'application plusieurs vulnérabilités pour qu'on soit capable de générer de nombreux scénarios d'
+attaque pour entraîner des une blue-team à faire des recherches dans kube. Documente les scénarios possibles.
+
+L'application doit servir pour faire du contrôle de vols aériens, stocker et partager des données etc...

@@ -1,0 +1,24 @@
+global:
+  imagePullPolicy: IfNotPresent
+
+api:
+  image:
+    repository: vulnkube/airops-api
+    tag: local
+
+frontend:
+  image:
+    repository: vulnkube/airops-frontend
+    tag: local
+
+caddy:
+  service:
+    type: NodePort
+    nodePort: 30080
+
+ingress:
+  enabled: true
+  className: traefik
+  host: airops.localtest.me
+  extraHosts:
+    - localhost

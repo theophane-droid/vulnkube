@@ -1,0 +1,6 @@
+apiVersion: v2
+name: airops
+description: AirOps vulnerable Kubernetes lab for blue-team log investigation
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

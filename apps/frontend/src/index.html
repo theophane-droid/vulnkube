@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AirOps Control</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              runway: "#08111f",
+              panel: "#0f172a",
+              radar: "#14b8a6",
+              signal: "#f59e0b",
+              mist: "#e2e8f0"
+            }
+          }
+        }
+      };
+    </script>
+    <link rel="stylesheet" href="/styles.css?v=4" />
+  </head>
+  <body class="min-h-screen bg-runway text-slate-100 antialiased">
+    <div id="login-screen" class="min-h-screen">
+      <main class="grid min-h-screen grid-cols-1 lg:grid-cols-[minmax(0,1.1fr)_440px]">
+        <section class="relative overflow-hidden px-6 py-8 sm:px-10 lg:px-14">
+          <div class="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(20,184,166,0.22),transparent_28%),radial-gradient(circle_at_78%_30%,rgba(245,158,11,0.16),transparent_30%),linear-gradient(135deg,#08111f_0%,#0f172a_55%,#14213d_100%)]"></div>
+          <div class="absolute inset-x-0 bottom-0 h-52 bg-gradient-to-t from-runway to-transparent"></div>
+
+          <div class="relative flex min-h-[calc(100vh-4rem)] flex-col justify-between">
+            <nav class="flex items-center justify-between gap-4">
+              <div>
+                <p class="text-xs font-bold uppercase tracking-[0.22em] text-radar">AirOps Control</p>
+                <p class="mt-1 text-sm text-slate-400">Top Gun identity and flight lab</p>
+              </div>
+              <a class="rounded-md border border-white/15 bg-white/10 px-3 py-2 text-sm font-bold text-slate-100 backdrop-blur transition hover:border-radar hover:text-radar" href="/auth">Keycloak</a>
+            </nav>
+
+            <div class="max-w-4xl py-14">
+              <div class="mb-6 inline-flex rounded-full border border-radar/30 bg-radar/10 px-3 py-1 text-sm font-bold text-radar">Acces restreint</div>
+              <h1 class="max-w-4xl text-5xl font-bold tracking-normal text-white sm:text-6xl lg:text-7xl">Console operations aeriennes et identite</h1>
+              <p class="mt-6 max-w-2xl text-lg leading-8 text-slate-300">
+                Connecte-toi avec un compte Top Gun pour afficher la carte des vols, les clearances et les outils d'investigation. Les comptes self-service sont crees en viewer et restent sans droits operationnels.
+              </p>
+
+              <div class="mt-10 grid max-w-3xl grid-cols-1 gap-3 sm:grid-cols-3">
+                <div class="rounded-lg border border-white/10 bg-white/10 p-4 backdrop-blur">
+                  <p class="text-3xl font-bold text-white">LDAP</p>
+                  <p class="mt-1 text-sm text-slate-300">dc=topgun,dc=local</p>
+                </div>
+                <div class="rounded-lg border border-white/10 bg-white/10 p-4 backdrop-blur">
+                  <p class="text-3xl font-bold text-white">OIDC</p>
+                  <p class="mt-1 text-sm text-slate-300">Realm airops</p>
+                </div>
+                <div class="rounded-lg border border-white/10 bg-white/10 p-4 backdrop-blur">
+                  <p class="text-3xl font-bold text-white">Map</p>
+                  <p class="mt-1 text-sm text-slate-300">Vols actifs</p>
+                </div>
+              </div>
+            </div>
+
+            <p class="text-sm text-slate-500">Ingress Traefik / Caddy / GraphQL / PostgreSQL / Redis</p>
+          </div>
+        </section>
+
+        <aside class="flex items-center border-l border-white/10 bg-slate-950 px-5 py-8 sm:px-8">
+          <div class="w-full rounded-lg border border-slate-800 bg-slate-900 p-5 shadow-2xl shadow-black/30">
+            <div class="mb-5">
+              <p class="text-xs font-bold uppercase tracking-[0.18em] text-radar">Authentification</p>
+              <h2 class="mt-2 text-2xl font-bold text-white">Entrer dans AirOps</h2>
+            </div>
+
+            <form id="login-form" class="grid gap-3">
+              <label class="grid gap-1 text-sm font-bold text-slate-300">
+                Callsign
+                <input id="login-callsign" class="field dark-field" placeholder="maverick" value="maverick" autocomplete="username" />
+              </label>
+              <label class="grid gap-1 text-sm font-bold text-slate-300">
+                Mot de passe
+                <input id="login-password" class="field dark-field" placeholder="password" value="dangerzone" type="password" autocomplete="current-password" />
+              </label>
+              <button class="primary-button">Se connecter</button>
+            </form>
+
+            <div class="my-6 border-t border-slate-800"></div>
+
+            <details class="group">
+              <summary class="cursor-pointer list-none text-sm font-bold text-slate-300 transition group-open:text-radar">Creer un compte viewer</summary>
+              <form id="signup-form" class="mt-4 grid gap-3">
+                <input id="signup-callsign" class="field dark-field" placeholder="nouveau callsign" autocomplete="off" />
+                <input id="signup-name" class="field dark-field" placeholder="nom affiche" autocomplete="off" />
+                <input id="signup-email" class="field dark-field" placeholder="email" autocomplete="email" />
+                <input id="signup-password" class="field dark-field" placeholder="mot de passe" type="password" autocomplete="new-password" />
+                <button class="secondary-button dark-secondary">Creer sans droits</button>
+              </form>
+            </details>
+
+            <pre id="auth-result" class="mt-5 min-h-24 rounded-lg border border-slate-800 bg-black/40 p-3 text-sm leading-6 text-cyan-50">Aucune session active.</pre>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <div id="app-screen" class="hidden min-h-screen">
+      <aside class="fixed inset-y-0 left-0 z-20 hidden w-72 border-r border-slate-800 bg-slate-950 p-4 lg:block">
+        <div class="mb-7 rounded-lg border border-slate-800 bg-slate-900 p-4">
+          <p class="text-xs font-bold uppercase tracking-[0.18em] text-radar">AirOps</p>
+          <h1 class="mt-2 text-xl font-bold text-white">Control Center</h1>
+          <p id="session" class="mt-3 rounded-full border border-signal/30 bg-signal/10 px-3 py-1 text-sm font-bold text-signal">anonymous / viewer</p>
+        </div>
+
+        <nav id="main-nav" class="grid gap-2">
+          <button class="nav-item active" data-view-target="dashboard">Tableau de bord</button>
+          <button class="nav-item" data-view-target="flights">Vols & carte</button>
+          <button class="nav-item" data-view-target="clearances">Clearances</button>
+          <button class="nav-item" data-view-target="weather">Meteo</button>
+          <button class="nav-item" data-view-target="reports">Rapports</button>
+          <button class="nav-item" data-view-target="identity">Identite</button>
+        </nav>
+
+        <button id="logout" class="secondary-button dark-secondary mt-6">Deconnecter</button>
+      </aside>
+
+      <main class="min-h-screen lg:pl-72">
+        <header class="sticky top-0 z-10 border-b border-slate-800 bg-runway/90 px-4 py-3 backdrop-blur sm:px-6 lg:px-8">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p class="text-xs font-bold uppercase tracking-[0.18em] text-radar">Operations</p>
+              <h2 id="view-title" class="text-2xl font-bold text-white">Tableau de bord</h2>
+            </div>
+            <div id="mobile-nav" class="flex flex-wrap gap-2 lg:hidden">
+              <button class="mobile-nav active" data-view-target="dashboard">Board</button>
+              <button class="mobile-nav" data-view-target="flights">Vols</button>
+              <button class="mobile-nav" data-view-target="identity">ID</button>
+            </div>
+          </div>
+        </header>
+
+        <section id="access-denied" class="hidden p-4 sm:p-6 lg:p-8">
+          <div class="rounded-lg border border-signal/30 bg-signal/10 p-6">
+            <p class="text-sm font-bold uppercase tracking-[0.18em] text-signal">Acces viewer</p>
+            <h2 class="mt-2 text-3xl font-bold text-white">Aucun droit operationnel</h2>
+            <p class="mt-3 max-w-2xl text-slate-300">Ton compte est authentifie, mais son role ne permet pas de visualiser les vols, les clearances ou les outils. C'est le comportement attendu pour les comptes self-service.</p>
+          </div>
+        </section>
+
+        <div id="authorized-content" class="p-4 sm:p-6 lg:p-8">
+          <section class="view-section" data-view="dashboard">
+            <div class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.35fr)_360px]">
+              <article class="overflow-hidden rounded-lg border border-slate-800 bg-slate-900">
+                <div class="flex items-center justify-between border-b border-slate-800 px-5 py-4">
+                  <div>
+                    <p class="text-xs font-bold uppercase tracking-[0.18em] text-radar">Carte tactique</p>
+                    <h3 class="mt-1 text-xl font-bold text-white">Vols actuels</h3>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <button id="map-zoom-out" class="icon-button" title="Zoom arrière">-</button>
+                    <button id="map-reset" class="icon-button" title="Recentrer">⌂</button>
+                    <button id="map-zoom-in" class="icon-button" title="Zoom avant">+</button>
+                    <span class="rounded-full bg-radar/10 px-3 py-1 text-sm font-bold text-radar">live</span>
+                  </div>
+                </div>
+                <div class="p-4">
+                  <div id="flight-map" class="flight-map min-h-[520px]" aria-label="Carte des vols"></div>
+                </div>
+              </article>
+
+              <aside class="grid gap-4">
+                <article class="rounded-lg border border-slate-800 bg-slate-900 p-5">
+                  <p class="text-xs font-bold uppercase tracking-[0.18em] text-radar">Detail</p>
+                  <pre id="map-detail" class="mt-3 min-h-40 rounded-lg border border-slate-800 bg-black/40 p-3 text-sm leading-6 text-cyan-50">Selectionne un vol sur la carte.</pre>
+                </article>
+                <article class="rounded-lg border border-slate-800 bg-slate-900 p-5">
+                  <p class="text-xs font-bold uppercase tracking-[0.18em] text-radar">Identite</p>
+                  <div id="operator-card" class="mt-3 text-sm leading-6 text-slate-300"></div>
+                </article>
+              </aside>
+            </div>
+          </section>
+
+          <section class="view-section hidden" data-view="flights">
+            <article class="rounded-lg border border-slate-800 bg-slate-900 p-5">
+              <div class="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p class="text-xs font-bold uppercase tracking-[0.18em] text-radar">Recherche</p>
+                  <h3 class="mt-1 text-xl font-bold text-white">Vols</h3>
+                </div>
+                <form id="search-form" class="grid w-full gap-2 sm:w-auto sm:min-w-[420px] sm:grid-cols-[1fr_auto]">
+                  <input id="search" class="field dark-field" placeholder="AFR, LFPG, %..." autocomplete="off" />
+                  <button class="primary-button sm:w-auto">Rechercher</button>
+                </form>
+              </div>
+              <div id="flights" class="list mt-5 grid gap-3"></div>
+            </article>
+          </section>
+
+          <section class="view-section hidden" data-view="clearances">
+            <div class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.2fr)_420px]">
+              <article class="rounded-lg border border-slate-800 bg-slate-900 p-5">
+                <div class="flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <p class="text-xs font-bold uppercase tracking-[0.18em] text-radar">Tour de contrôle</p>
+                    <h3 class="mt-1 text-xl font-bold text-white">Clearances actives</h3>
+                  </div>
+                  <form id="clearances-form" class="grid w-full gap-2 sm:w-auto sm:min-w-[360px] sm:grid-cols-[1fr_auto]">
+                    <input id="clearances-search" class="field dark-field" placeholder="AFR, LFPG, maverick..." autocomplete="off" />
+                    <button class="primary-button sm:w-auto">Filtrer</button>
+                  </form>
+                </div>
+
+                <div class="mt-5 overflow-hidden rounded-lg border border-slate-800">
+                  <div class="grid grid-cols-[72px_1fr_120px_120px] gap-3 border-b border-slate-800 bg-slate-950 px-4 py-3 text-xs font-bold uppercase tracking-[0.14em] text-slate-400">
+                    <span>ID</span>
+                    <span>Vol / Route</span>
+                    <span>Statut</span>
+                    <span>Partage</span>
+                  </div>
+                  <div id="clearances-list" class="divide-y divide-slate-800"></div>
+                </div>
+              </article>
+
+              <aside class="grid gap-4">
+                <article class="rounded-lg border border-slate-800 bg-slate-900 p-5">
+                  <p class="text-xs font-bold uppercase tracking-[0.18em] text-radar">Fiche clearance</p>
+                  <h3 id="clearance-title" class="mt-2 text-xl font-bold text-white">Sélection requise</h3>
+                  <div id="clearance-detail" class="clearance-detail mt-4">Choisis une clearance dans la liste ou charge un ID précis.</div>
+                </article>
+
+                <article class="rounded-lg border border-slate-800 bg-slate-900 p-5">
+                  <p class="text-xs font-bold uppercase tracking-[0.18em] text-signal">Accès direct</p>
+                  <form id="clearance-form" class="mt-4 grid gap-3">
+                    <input id="clearance-id" class="field dark-field" placeholder="ID clearance" value="1" />
+                    <button class="primary-button">Charger par ID</button>
+                  </form>
+                  <pre id="clearance" class="mt-4 min-h-32 rounded-lg border border-slate-800 bg-black/40 p-3 text-sm leading-6 text-cyan-50"></pre>
+                </article>
+              </aside>
+            </div>
+          </section>
+
+          <section class="view-section hidden" data-view="weather">
+            <div class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.1fr)_420px]">
+              <article class="rounded-lg border border-slate-800 bg-slate-900 p-5">
+                <div class="flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <p class="text-xs font-bold uppercase tracking-[0.18em] text-radar">Prévisions disponibles</p>
+                    <h3 class="mt-1 text-xl font-bold text-white">Météo opérationnelle</h3>
+                  </div>
+                  <form id="forecast-form" class="grid w-full gap-2 sm:w-auto sm:grid-cols-[140px_120px_auto]">
+                    <input id="forecast-airport" class="field dark-field" placeholder="LFPG" value="LFPG" autocomplete="off" />
+                    <input id="forecast-hours" class="field dark-field" placeholder="12h" value="12" inputmode="numeric" />
+                    <button class="primary-button sm:w-auto">Consulter</button>
+                  </form>
+                </div>
+                <div id="forecast" class="mt-5 grid gap-3"></div>
+              </article>
+
+              <article class="rounded-lg border border-slate-800 bg-slate-900 p-5">
+                <h3 class="text-xl font-bold text-white">METAR distant</h3>
+                <form id="metar-form" class="mt-4 grid gap-3">
+                  <input id="metar-url" class="field dark-field" placeholder="https://tgftp.nws.noaa.gov/..." />
+                  <button class="primary-button sm:max-w-xs">Fetch</button>
+                </form>
+                <pre id="metar" class="mt-4 min-h-52 rounded-lg border border-slate-800 bg-black/40 p-3 text-sm leading-6 text-cyan-50"></pre>
+              </article>
+            </div>
+          </section>
+
+          <section class="view-section hidden" data-view="reports">
+            <article class="rounded-lg border border-slate-800 bg-slate-900 p-5">
+              <h3 class="text-xl font-bold text-white">Rapport S3</h3>
+              <form id="upload-form" class="mt-4 grid gap-3">
+                <input id="filename" class="field dark-field" placeholder="handover.txt" value="handover.txt" />
+                <textarea id="content" class="field dark-field min-h-32 resize-y">Shift handover report</textarea>
+                <button class="primary-button sm:max-w-xs">Uploader</button>
+              </form>
+              <pre id="upload" class="mt-4 min-h-40 rounded-lg border border-slate-800 bg-black/40 p-3 text-sm leading-6 text-cyan-50"></pre>
+            </article>
+          </section>
+
+          <section class="view-section hidden" data-view="identity">
+            <div class="grid grid-cols-1 gap-4 xl:grid-cols-3">
+              <article class="rounded-lg border border-slate-800 bg-slate-900 p-5">
+                <p class="text-xs font-bold uppercase tracking-[0.18em] text-radar">Keycloak</p>
+                <h3 class="mt-2 text-xl font-bold text-white">Realm airops</h3>
+                <p class="mt-3 text-sm leading-6 text-slate-300">Portail d'administration et federation identite du lab.</p>
+                <a class="primary-button mt-5 inline-flex w-auto items-center justify-center" href="/auth">Ouvrir Keycloak</a>
+              </article>
+              <article class="rounded-lg border border-slate-800 bg-slate-900 p-5">
+                <p class="text-xs font-bold uppercase tracking-[0.18em] text-radar">OpenLDAP</p>
+                <h3 class="mt-2 text-xl font-bold text-white">dc=topgun,dc=local</h3>
+                <p class="mt-3 text-sm leading-6 text-slate-300">Annuaire persistant, comptes Top Gun pre-seedes, stockage sur PVC.</p>
+              </article>
+              <article class="rounded-lg border border-slate-800 bg-slate-900 p-5">
+                <p class="text-xs font-bold uppercase tracking-[0.18em] text-signal">Self-service</p>
+                <h3 class="mt-2 text-xl font-bold text-white">Viewer sans droits</h3>
+                <p class="mt-3 text-sm leading-6 text-slate-300">Les nouveaux comptes restent authentifies mais ne voient aucun menu operationnel.</p>
+              </article>
+            </div>
+          </section>
+        </div>
+
+        <footer class="border-t border-slate-800 px-4 py-5 text-sm text-slate-500 sm:px-6 lg:px-8">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <span id="api-footer">AirOps API / GraphQL / REST telemetry</span>
+            <span>Operational data network / training control</span>
+          </div>
+        </footer>
+      </main>
+    </div>
+
+    <script src="/app.js?v=4"></script>
+  </body>
+</html>

@@ -1,0 +1,208 @@
+global:
+  imagePullPolicy: IfNotPresent
+
+lab:
+  enabledVulnerabilities:
+    - graphql-sqli
+    - graphql-idor
+    - weak-auth
+    - ssrf-fetcher
+    - s3-unvalidated-upload
+    - verbose-operational-logs
+    - self-service-viewer-bypass
+    - weak-telemetry-auth
+    - broad-weather-forecast-access
+
+  operators:
+    - callsign: maverick
+      displayName: Pete "Maverick" Mitchell
+      role: admin
+      password: dangerzone
+      email: maverick@topgun.local
+    - callsign: goose
+      displayName: Nick "Goose" Bradshaw
+      role: controller
+      password: talktomegoose
+      email: goose@topgun.local
+    - callsign: iceman
+      displayName: Tom "Iceman" Kazansky
+      role: controller
+      password: icecold
+      email: iceman@topgun.local
+    - callsign: slider
+      displayName: Ron "Slider" Kerner
+      role: controller
+      password: slide123
+      email: slider@topgun.local
+    - callsign: viper
+      displayName: Mike "Viper" Metcalf
+      role: admin
+      password: towerboss
+      email: viper@topgun.local
+    - callsign: jester
+      displayName: Rick "Jester" Heatherly
+      role: controller
+      password: bugout
+      email: jester@topgun.local
+    - callsign: charlie
+      displayName: Charlotte "Charlie" Blackwood
+      role: analyst
+      password: migdata
+      email: charlie@topgun.local
+    - callsign: rooster
+      displayName: Bradley "Rooster" Bradshaw
+      role: controller
+      password: greatballs
+      email: rooster@topgun.local
+    - callsign: phoenix
+      displayName: Natasha "Phoenix" Trace
+      role: controller
+      password: talon123
+      email: phoenix@topgun.local
+    - callsign: bob
+      displayName: Robert "Bob" Floyd
+      role: analyst
+      password: backseat
+      email: bob@topgun.local
+    - callsign: hangman
+      displayName: Jake "Hangman" Seresin
+      role: controller
+      password: bagman
+      email: hangman@topgun.local
+    - callsign: payback
+      displayName: Reuben "Payback" Fitch
+      role: controller
+      password: tallyho
+      email: payback@topgun.local
+
+api:
+  replicaCount: 1
+  image:
+    repository: vulnkube/airops-api
+    tag: local
+  service:
+    port: 4000
+  env:
+    adminToken: air-ops-admin
+
+frontend:
+  replicaCount: 1
+  image:
+    repository: vulnkube/airops-frontend
+    tag: local
+  service:
+    port: 8080
+
+caddy:
+  replicaCount: 1
+  image:
+    repository: caddy
+    tag: 2.8-alpine
+  service:
+    type: NodePort
+    port: 80
+    nodePort: 30080
+
+ingress:
+  enabled: true
+  className: traefik
+  host: airops.localtest.me
+  extraHosts:
+    - localhost
+  path: /
+  annotations: {}
+
+openldap:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: osixia/openldap
+    tag: "1.5.0"
+  domain: topgun.local
+  organization: Top Gun
+  adminPassword: topgun-admin
+  service:
+    port: 389
+  persistence:
+    enabled: true
+    dataSize: 1Gi
+    configSize: 256Mi
+
+keycloak:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: quay.io/keycloak/keycloak
+    tag: "26.1.4"
+  admin:
+    username: admin
+    password: topgun-admin
+  realm: airops
+  clientId: airops-frontend
+  service:
+    port: 8080
+
+postgresql:
+  image:
+    repository: postgres
+    tag: "16-alpine"
+  auth:
+    database: airops
+    username: airops
+    password: airops
+  persistence:
+    enabled: true
+    size: 1Gi
+
+redis:
+  image:
+    repository: redis
+    tag: "7-alpine"
+  persistence:
+    enabled: true
+    size: 512Mi
+
+minio:
+  image:
+    repository: minio/minio
+    tag: RELEASE.2025-02-28T09-55-16Z
+  mcImage:
+    repository: minio/mc
+    tag: RELEASE.2025-02-21T16-00-46Z
+  auth:
+    rootUser: minioadmin
+    rootPassword: minioadmin
+  bucket: flight-data
+  persistence:
+    enabled: true
+    size: 2Gi
+
+resources:
+  api:
+    requests:
+      cpu: 100m
+      memory: 160Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  frontend:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  openldap:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+  keycloak:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: 800m
+      memory: 1Gi
