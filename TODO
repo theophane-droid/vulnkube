@@ -1,0 +1,11 @@
+- [x] Faire un script de bootstrap pg pour créer le user keycloak
+- [x] Faire utiliser une base postgres externe à keycloak
+- [ ] Passer à Traefik
+- [ ] Exposer l'interface keycloak sur /auth
+- [ ] Tester les flow d'authent
+
+## Done
+
+- [x] Boostraping script for pg dabase creation
+- [x] External DB usage with Keycloak
+

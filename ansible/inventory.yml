@@ -1,0 +1,21 @@
+all:
+  children:
+    server:
+      hosts:
+        localhost:
+          ansible_connection: local
+
+k3s_cluster:
+  children:
+    server:
+      hosts:
+        localhost:
+          ansible_connection: local
+    agent:
+      hosts:
+
+  vars:
+    ansible_user: "{{ lookup('env', 'USER') }}"
+    k3s_version: v1.31.12+k3s1
+    token: "changeme-local-dev-token"
+    api_endpoint: "127.0.0.1"

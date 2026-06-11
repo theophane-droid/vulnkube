@@ -1,0 +1,83 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "airops.fullname" . }}-postgresql-keycloak-bootstrap
+  labels:
+    {{- include "airops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgresql-bootstrap
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        {{- include "airops.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: postgresql-bootstrap
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: bootstrap
+          image: "{{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PGHOST
+              value: {{ include "airops.fullname" . }}-postgresql
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: postgres
+            - name: PGUSER
+              value: {{ .Values.postgresql.auth.username | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "airops.fullname" . }}-secrets
+                  key: postgres-password
+
+            - name: KC_DB_NAME
+              value: {{ .Values.keycloak.db.database | quote }}
+            - name: KC_DB_USER
+              value: {{ .Values.keycloak.db.username | quote }}
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "airops.fullname" . }}-secrets
+                  key: keycloak-db-password
+
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+
+              echo "Waiting for PostgreSQL..."
+              until pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER"; do
+                sleep 2
+              done
+
+              echo "Creating Keycloak role if missing..."
+              psql -v ON_ERROR_STOP=1 <<SQL
+              DO \$\$
+              BEGIN
+                IF NOT EXISTS (
+                  SELECT FROM pg_catalog.pg_roles WHERE rolname = '${KC_DB_USER}'
+                ) THEN
+                  CREATE ROLE ${KC_DB_USER} LOGIN PASSWORD '${KC_DB_PASSWORD}';
+                END IF;
+              END
+              \$\$;
+              SQL
+
+              echo "Creating Keycloak database if missing..."
+              DB_EXISTS="$(psql -tAc "SELECT 1 FROM pg_database WHERE datname='${KC_DB_NAME}'")"
+
+              if [ "$DB_EXISTS" != "1" ]; then
+                createdb -O "$KC_DB_USER" "$KC_DB_NAME"
+              fi
+
+              echo "Granting privileges..."
+              psql -d "$KC_DB_NAME" -v ON_ERROR_STOP=1 <<SQL
+              GRANT ALL PRIVILEGES ON DATABASE ${KC_DB_NAME} TO ${KC_DB_USER};
+              GRANT ALL ON SCHEMA public TO ${KC_DB_USER};
+              SQL
+
+              echo "Bootstrap done."

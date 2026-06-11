@@ -1,0 +1,86 @@
+---
+- name: Deploy local Airops lab on k3s
+  hosts: localhost
+  gather_facts: true
+
+  tasks:
+    - name: Ensure local bin directory exists
+      ansible.builtin.file:
+        path: "{{ ansible_env.HOME }}/.local/bin"
+        state: directory
+        mode: "0755"
+
+    - name: Check if helm exists
+      ansible.builtin.stat:
+        path: "{{ helm_bin }}"
+      register: helm_stat
+
+    - name: Install Helm locally
+      when: not helm_stat.stat.exists
+      block:
+        - name: Download Helm archive
+          ansible.builtin.get_url:
+            url: "https://get.helm.sh/helm-{{ helm_version }}-linux-amd64.tar.gz"
+            dest: "/tmp/helm-{{ helm_version }}-linux-amd64.tar.gz"
+            mode: "0644"
+
+        - name: Extract Helm archive
+          ansible.builtin.unarchive:
+            src: "/tmp/helm-{{ helm_version }}-linux-amd64.tar.gz"
+            dest: /tmp
+            remote_src: true
+
+        - name: Install Helm binary
+          ansible.builtin.copy:
+            src: /tmp/linux-amd64/helm
+            dest: "{{ helm_bin }}"
+            mode: "0755"
+
+    - name: Verify kubectl access
+      ansible.builtin.command:
+        cmd: kubectl get nodes
+      changed_when: false
+
+    - name: Build local images
+      ansible.builtin.command:
+        cmd: "{{ image_runtime }} build -t {{ item.tag }} {{ item.context }}"
+      loop: "{{ images }}"
+      register: image_builds
+      changed_when: "'Successfully' in image_builds.stdout or image_builds.rc == 0"
+
+    - name: Export images to tar
+      ansible.builtin.command:
+        cmd: "{{ image_runtime }} save {{ item.tag }} -o /tmp/{{ item.name }}.tar"
+      loop: "{{ images }}"
+      changed_when: true
+
+    - name: Import images into k3s containerd
+      become: true
+      ansible.builtin.command:
+        cmd: "k3s ctr images import /tmp/{{ item.name }}.tar"
+      loop: "{{ images }}"
+      changed_when: true
+
+    - name: Ensure namespace exists
+      ansible.builtin.command:
+        cmd: kubectl create namespace {{ namespace }}
+      register: ns_create
+      failed_when:
+        - ns_create.rc != 0
+        - "'AlreadyExists' not in ns_create.stderr"
+      changed_when: ns_create.rc == 0
+
+    - name: Deploy or update Helm chart
+      ansible.builtin.command:
+        cmd: >
+          {{ helm_bin }} upgrade --install {{ release_name }} {{ chart_path }}
+          --namespace {{ namespace }}
+          --create-namespace
+          --values {{ values_file }}
+          --set imagePullPolicy=Never
+      changed_when: true
+
+    - name: Show deployed resources
+      ansible.builtin.command:
+        cmd: kubectl get all -n {{ namespace }}
+      changed_when: false

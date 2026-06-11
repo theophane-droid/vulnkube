@@ -81,6 +81,21 @@ spec:
             - containerPort: 8080
               name: http
           env:
+            - name: KC_DB
+              value: postgres
+
+            - name: KC_DB_URL
+              value: jdbc:postgresql://{{ include "airops.fullname" . }}-postgresql:5432/{{ .Values.keycloak.db.database }}
+
+            - name: KC_DB_USERNAME
+              value: {{ .Values.keycloak.db.username | quote }}
+
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "airops.fullname" . }}-secrets
+                  key: keycloak-db-password
+
             - name: KEYCLOAK_ADMIN
               value: {{ .Values.keycloak.admin.username | quote }}
             - name: KEYCLOAK_ADMIN_PASSWORD
@@ -92,12 +107,14 @@ spec:
               value: xforwarded
             - name: KC_HTTP_ENABLED
               value: "true"
+            - name: KC_HTTP_RELATIVE_PATH
+              value: "/auth"
           volumeMounts:
             - name: realm
               mountPath: /opt/keycloak/data/import
           readinessProbe:
             httpGet:
-              path: /auth/realms/{{ .Values.keycloak.realm }}
+              path: /realms/{{ .Values.keycloak.realm }}
               port: http
             initialDelaySeconds: 30
             periodSeconds: 10

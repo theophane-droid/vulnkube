@@ -14,11 +14,26 @@ frontend:
 caddy:
   service:
     type: NodePort
+    port: 80
     nodePort: 30080
+
+keycloak:
+  ingressPath: /auth
+
+  admin:
+    username: admin
+    password: admin
+
+  db:
+    username: keycloak
+    password: keycloak
+    database: keycloak
+
+  service:
+    port: 8080
 
 ingress:
   enabled: true
   className: traefik
-  host: airops.localtest.me
-  extraHosts:
-    - localhost
+  path: /
+  annotations: {}

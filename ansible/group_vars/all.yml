@@ -1,0 +1,19 @@
+project_dir: "{{ lookup('env', 'PWD') }}/.."
+
+helm_version: "v3.15.4"
+helm_bin: "{{ ansible_env.HOME }}/.local/bin/helm"
+
+image_runtime: "docker"   # docker, podman ou nerdctl
+
+images:
+  - name: airops-api
+    context: "{{ project_dir }}/apps/api"
+    tag: "vulnkube/airops-api:local"
+  - name: airops-frontend
+    context: "{{ project_dir }}/apps/frontend"
+    tag: "vulnkube/airops-frontend:local"
+
+namespace: airops
+release_name: airops
+chart_path: "{{ project_dir }}/charts/airops"
+values_file: "{{ project_dir }}/charts/airops/values-local.yaml"
