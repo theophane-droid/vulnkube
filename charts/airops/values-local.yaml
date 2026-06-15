@@ -1,5 +1,6 @@
 global:
   imagePullPolicy: IfNotPresent
+  hostname: "192.168.10.252"
 
 api:
   image:

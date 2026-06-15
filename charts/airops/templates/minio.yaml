@@ -44,6 +44,8 @@ spec:
                 secretKeyRef:
                   name: {{ include "airops.fullname" . }}-secrets
                   key: minio-root-password
+            - name: MINIO_BROWSER_REDIRECT_URL
+              value: "http://{{ .Values.global.hostname }}/minio/"
           readinessProbe:
             httpGet:
               path: /minio/health/ready
@@ -79,7 +81,7 @@ spec:
       port: 9000
       targetPort: s3
     - name: console
-      port: 9001
+      port: {{ .Values.minio.service.port }}
       targetPort: console
 ---
 apiVersion: batch/v1

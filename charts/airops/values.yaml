@@ -104,7 +104,6 @@ caddy:
     nodePort: 30080
 
 ingress:
-  enabled: true
   className: traefik
   host: airops.localtest.me
   extraHosts:
@@ -142,6 +141,7 @@ keycloak:
   service:
     port: 8080
 
+
 postgresql:
   image:
     repository: postgres
@@ -176,6 +176,8 @@ minio:
   persistence:
     enabled: true
     size: 2Gi
+  service:
+    port: 9001
 
 resources:
   api:
