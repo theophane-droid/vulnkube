@@ -12,7 +12,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: {{ .Values.openldap.persistence.dataSize }}
+      storage: {{ .Values.openldap.persistence.dataSize | quote }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -26,7 +26,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: {{ .Values.openldap.persistence.configSize }}
+      storage: {{ .Values.openldap.persistence.configSize | quote }}
 ---
 {{- end }}
 apiVersion: v1
@@ -37,7 +37,7 @@ metadata:
     {{- include "airops.labels" . | nindent 4 }}
     app.kubernetes.io/component: openldap
 data:
-  10-topgun-users.ldif: |
+  11-topgun-users.ldif: |
     dn: ou=people,dc=topgun,dc=local
     objectClass: organizationalUnit
     ou: people
@@ -48,14 +48,15 @@ data:
 
 {{ range .Values.lab.operators }}
     dn: uid={{ .callsign }},ou=people,dc=topgun,dc=local
-    objectClass: inetOrgPerson
-    objectClass: organizationalPerson
-    objectClass: person
     objectClass: top
+    objectClass: person
+    objectClass: organizationalPerson
+    objectClass: inetOrgPerson
     cn: {{ .displayName }}
     sn: {{ .callsign }}
     uid: {{ .callsign }}
     mail: {{ .email }}
+    employeeType: {{ .role }}
     userPassword: {{ .password }}
 
 {{ end }}
@@ -78,6 +79,8 @@ spec:
       labels:
         {{- include "airops.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: openldap
+      annotations:
+        checksum/openldap-bootstrap: {{ toJson .Values.lab.operators | sha256sum }}
     spec:
       initContainers:
         - name: copy-bootstrap
@@ -86,12 +89,14 @@ spec:
           command:
             - /bin/sh
             - -ec
-            - cp /bootstrap-readonly/* /bootstrap-writable/
+            - |
+              cp /bootstrap-readonly/* /bootstrap-writable/
           volumeMounts:
             - name: bootstrap-readonly
               mountPath: /bootstrap-readonly
             - name: bootstrap
               mountPath: /bootstrap-writable
+
       containers:
         - name: openldap
           image: "{{ .Values.openldap.image.repository }}:{{ .Values.openldap.image.tag }}"
@@ -102,35 +107,46 @@ spec:
           env:
             - name: LDAP_ORGANISATION
               value: {{ .Values.openldap.organization | quote }}
+
             - name: LDAP_DOMAIN
               value: {{ .Values.openldap.domain | quote }}
+
             - name: LDAP_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "airops.fullname" . }}-secrets
                   key: openldap-admin-password
+
             - name: LDAP_REMOVE_CONFIG_AFTER_SETUP
               value: "false"
+
           volumeMounts:
             - name: ldap-data
               mountPath: /var/lib/ldap
+
             - name: ldap-config
               mountPath: /etc/ldap/slapd.d
+
             - name: bootstrap
               mountPath: /container/service/slapd/assets/config/bootstrap/ldif/custom
+
           readinessProbe:
             tcpSocket:
               port: ldap
-            initialDelaySeconds: 10
+            initialDelaySeconds: 15
             periodSeconds: 10
+
           resources:
             {{- toYaml .Values.resources.openldap | nindent 12 }}
+
       volumes:
         - name: bootstrap-readonly
           configMap:
             name: {{ include "airops.fullname" . }}-openldap-bootstrap
+
         - name: bootstrap
           emptyDir: {}
+
         - name: ldap-data
           {{- if .Values.openldap.persistence.enabled }}
           persistentVolumeClaim:
@@ -138,6 +154,7 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+
         - name: ldap-config
           {{- if .Values.openldap.persistence.enabled }}
           persistentVolumeClaim:

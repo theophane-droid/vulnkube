@@ -57,6 +57,19 @@ spec:
                   key: admin-token
             - name: LAB_OPERATORS
               value: {{ toJson .Values.lab.operators | quote }}
+
+            - name: KEYCLOAK_BASE_URL
+              value: http://{{ include "airops.fullname" . }}-keycloak:{{ .Values.keycloak.service.port }}/auth
+
+            - name: KEYCLOAK_REALM
+              value: {{ .Values.keycloak.realm | quote }}
+
+            - name: KEYCLOAK_CLIENT_ID
+              value: {{ .Values.keycloak.clientId | quote }}
+
+            - name: KEYCLOAK_CLIENT_SECRET
+              value: {{ .Values.keycloak.clientSecret | quote }} # TODO : pas bien 
+
           readinessProbe:
             httpGet:
               path: /readyz

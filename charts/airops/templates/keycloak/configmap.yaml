@@ -1,0 +1,190 @@
+{{- if .Values.keycloak.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "airops.fullname" . }}-keycloak-realm
+  labels:
+    {{- include "airops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: keycloak
+data:
+  airops-realm.json: |
+    {
+      "realm": {{ .Values.keycloak.realm | quote }},
+      "enabled": true,
+
+      "eventsEnabled": true,
+      "adminEventsEnabled": true,
+      "adminEventsDetailsEnabled": true,
+      "eventsExpiration": 604800,
+      "eventsListeners": ["jboss-logging"],
+
+      "registrationAllowed": false,
+      "loginWithEmailAllowed": true,
+
+      "roles": {
+        "realm": [
+          { "name": "admin" },
+          { "name": "controller" },
+          { "name": "analyst" },
+          { "name": "viewer" }
+        ]
+      },
+
+      "clients": [
+        {
+          "clientId": {{ .Values.keycloak.clientId | quote }},
+          "name": "AirOps Backend",
+          "enabled": true,
+          "publicClient": false,
+          "clientAuthenticatorType": "client-secret",
+          "secret": {{ .Values.keycloak.clientSecret | quote }},
+
+          "standardFlowEnabled": true,
+          "directAccessGrantsEnabled": true,
+          "serviceAccountsEnabled": false,
+
+          "redirectUris": [],
+          "webOrigins": [],
+
+          "protocol": "openid-connect",
+          "protocolMappers": [
+            {
+              "name": "callsign",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-usermodel-attribute-mapper",
+              "consentRequired": false,
+              "config": {
+                "user.attribute": "callsign",
+                "claim.name": "callsign",
+                "jsonType.label": "String",
+                "access.token.claim": "true",
+                "id.token.claim": "true",
+                "userinfo.token.claim": "true"
+              }
+            },
+            {
+              "name": "role",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-usermodel-attribute-mapper",
+              "consentRequired": false,
+              "config": {
+                "user.attribute": "role",
+                "claim.name": "role",
+                "jsonType.label": "String",
+                "access.token.claim": "true",
+                "id.token.claim": "true",
+                "userinfo.token.claim": "true"
+              }
+            }
+          ]
+        }
+      ],
+
+      "components": {
+        "org.keycloak.storage.UserStorageProvider": [
+          {
+            "id": "openldap",
+            "name": "openldap",
+            "providerId": "ldap",
+            "config": {
+              "enabled": ["true"],
+              "priority": ["0"],
+
+              "vendor": ["other"],
+              "connectionUrl": [
+                "ldap://{{ include "airops.fullname" . }}-openldap:{{ .Values.openldap.service.port }}"
+              ],
+
+              "authType": ["simple"],
+              "bindDn": ["cn=admin,dc=topgun,dc=local"],
+              "bindCredential": [{{ .Values.openldap.adminPassword | quote }}],
+
+              "usersDn": ["ou=people,dc=topgun,dc=local"],
+
+              "usernameLDAPAttribute": ["uid"],
+              "rdnLDAPAttribute": ["uid"],
+              "uuidLDAPAttribute": ["uid"],
+
+              "userObjectClasses": ["inetOrgPerson, organizationalPerson, person"],
+              "searchScope": ["1"],
+
+              "editMode": ["READ_ONLY"],
+              "importEnabled": ["true"],
+              "syncRegistrations": ["false"],
+
+              "connectionPooling": ["true"],
+              "useTruststoreSpi": ["ldapsOnly"],
+              "pagination": ["false"],
+
+              "allowKerberosAuthentication": ["false"],
+              "useKerberosForPasswordAuthentication": ["false"],
+
+              "batchSizeForSync": ["1000"],
+              "fullSyncPeriod": ["-1"],
+              "changedSyncPeriod": ["-1"],
+              "cachePolicy": ["DEFAULT"]
+            },
+            "subComponents": {
+              "org.keycloak.storage.ldap.mappers.LDAPStorageMapper": [
+                {
+                  "name": "username",
+                  "providerId": "user-attribute-ldap-mapper",
+                  "config": {
+                    "ldap.attribute": ["uid"],
+                    "is.mandatory.in.ldap": ["true"],
+                    "read.only": ["true"],
+                    "always.read.value.from.ldap": ["true"],
+                    "user.model.attribute": ["username"]
+                  }
+                },
+                {
+                  "name": "email",
+                  "providerId": "user-attribute-ldap-mapper",
+                  "config": {
+                    "ldap.attribute": ["mail"],
+                    "is.mandatory.in.ldap": ["false"],
+                    "read.only": ["true"],
+                    "always.read.value.from.ldap": ["true"],
+                    "user.model.attribute": ["email"]
+                  }
+                },
+                {
+                  "name": "first name",
+                  "providerId": "user-attribute-ldap-mapper",
+                  "config": {
+                    "ldap.attribute": ["cn"],
+                    "is.mandatory.in.ldap": ["false"],
+                    "read.only": ["true"],
+                    "always.read.value.from.ldap": ["true"],
+                    "user.model.attribute": ["firstName"]
+                  }
+                },
+                {
+                  "name": "callsign",
+                  "providerId": "user-attribute-ldap-mapper",
+                  "config": {
+                    "ldap.attribute": ["uid"],
+                    "is.mandatory.in.ldap": ["true"],
+                    "read.only": ["true"],
+                    "always.read.value.from.ldap": ["true"],
+                    "user.model.attribute": ["callsign"]
+                  }
+                },
+                {
+                  "name": "role",
+                  "providerId": "user-attribute-ldap-mapper",
+                  "config": {
+                    "ldap.attribute": ["employeeType"],
+                    "is.mandatory.in.ldap": ["false"],
+                    "read.only": ["true"],
+                    "always.read.value.from.ldap": ["true"],
+                    "user.model.attribute": ["role"]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+{{- end }}

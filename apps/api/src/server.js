@@ -12,8 +12,11 @@ const databaseUrl = process.env.DATABASE_URL || "postgres://airops:airops@postgr
 const redisUrl = process.env.REDIS_URL || "redis://redis:6379";
 const s3Endpoint = process.env.S3_ENDPOINT || "http://minio:9000";
 const s3Bucket = process.env.S3_BUCKET || "flight-data";
-const adminToken = process.env.ADMIN_TOKEN || "air-ops-admin";
-const labOperators = JSON.parse(process.env.LAB_OPERATORS || "[]");
+
+const keycloakBaseUrl = process.env.KEYCLOAK_BASE_URL || "http://keycloak:8080/auth";
+const keycloakRealm = process.env.KEYCLOAK_REALM || "airops";
+const keycloakClientId = process.env.KEYCLOAK_CLIENT_ID || "airops-backend";
+const keycloakClientSecret = process.env.KEYCLOAK_CLIENT_SECRET || "airops-backend-secret-change-me";
 
 const pool = new Pool({ connectionString: databaseUrl });
 const redis = new Redis(redisUrl);
@@ -27,6 +30,14 @@ const s3 = new S3Client({
   }
 });
 
+function keycloakTokenEndpoint() {
+  return `${keycloakBaseUrl}/realms/${keycloakRealm}/protocol/openid-connect/token`;
+}
+
+function keycloakIntrospectionEndpoint() {
+  return `${keycloakBaseUrl}/realms/${keycloakRealm}/protocol/openid-connect/token/introspect`;
+}
+
 function requestLog(req, event, extra = {}) {
   const entry = {
     ts: new Date().toISOString(),
@@ -38,22 +49,15 @@ function requestLog(req, event, extra = {}) {
     userAgent: req.headers["user-agent"],
     path: req.path,
     method: req.method,
-    actor: actorFromRequest(req),
+    actor: req.auth?.operator?.callsign || "anonymous",
     ...extra
   };
+
   console.log(JSON.stringify(entry));
 }
 
 async function initDb() {
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS operators (
-      id SERIAL PRIMARY KEY,
-      callsign TEXT NOT NULL,
-      role TEXT NOT NULL,
-      password TEXT NOT NULL,
-      display_name TEXT NOT NULL DEFAULT '',
-      email TEXT NOT NULL DEFAULT ''
-    );
     CREATE TABLE IF NOT EXISTS flights (
       id SERIAL PRIMARY KEY,
       flight_no TEXT NOT NULL,
@@ -94,9 +98,6 @@ async function initDb() {
   `);
 
   await pool.query(`
-    ALTER TABLE operators ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT '';
-    ALTER TABLE operators ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';
-    CREATE UNIQUE INDEX IF NOT EXISTS operators_callsign_idx ON operators (callsign);
     ALTER TABLE flights ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION NOT NULL DEFAULT 0;
     ALTER TABLE flights ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION NOT NULL DEFAULT 0;
     ALTER TABLE flights ADD COLUMN IF NOT EXISTS heading INTEGER NOT NULL DEFAULT 0;
@@ -110,24 +111,8 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS weather_forecasts_airport_idx ON weather_forecasts (airport, valid_from);
   `);
 
-  const defaultOperators = labOperators.length > 0 ? labOperators : [
-    { callsign: "maverick", displayName: "Pete \"Maverick\" Mitchell", role: "admin", password: "dangerzone", email: "maverick@topgun.local" },
-    { callsign: "goose", displayName: "Nick \"Goose\" Bradshaw", role: "controller", password: "talktomegoose", email: "goose@topgun.local" },
-    { callsign: "iceman", displayName: "Tom \"Iceman\" Kazansky", role: "controller", password: "icecold", email: "iceman@topgun.local" },
-    { callsign: "charlie", displayName: "Charlotte \"Charlie\" Blackwood", role: "analyst", password: "migdata", email: "charlie@topgun.local" }
-  ];
-
-  for (const operator of defaultOperators) {
-    await pool.query(
-      `INSERT INTO operators (callsign, role, password, display_name, email)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (callsign)
-       DO UPDATE SET role = EXCLUDED.role, display_name = EXCLUDED.display_name, email = EXCLUDED.email`,
-      [operator.callsign, operator.role, operator.password, operator.displayName || operator.callsign, operator.email || `${operator.callsign}@topgun.local`]
-    );
-  }
-
   const { rows } = await pool.query("SELECT COUNT(*)::int AS count FROM flights");
+
   if (rows[0].count === 0) {
     await pool.query(`
       INSERT INTO flights (flight_no, origin, destination, status, altitude, owner_callsign, notes, latitude, longitude, heading, speed, vertical_rate, aircraft_type, registration, squawk, sector) VALUES
@@ -136,6 +121,7 @@ async function initDb() {
         ('BOX808', 'LFBO', 'EGLL', 'ENROUTE', 26000, 'goose', 'Partner cargo flight', 47.92, 0.62, 338, 412, 300, 'B738', 'G-BOXA', '6314', 'BREST-NE'),
         ('NAVY86', 'LFRJ', 'LFMI', 'TACTICAL', 22000, 'phoenix', 'Training package rerouted through coastal corridor', 45.02, -0.88, 128, 430, 0, 'F18', 'NAVY086', '7001', 'AQUITAINE'),
         ('TOP114', 'LFLY', 'LFBD', 'HOLDING', 14000, 'hangman', 'Restricted exercise track', 45.33, 2.25, 242, 265, 0, 'PC21', 'F-RSDI', '7044', 'MASSIF');
+
       INSERT INTO clearances (flight_id, route, shared_with) VALUES
         (1, 'LGL UM733 KOK UT27 DVR', 'maverick'),
         (2, 'ROLIS T116 BANOX', 'iceman'),
@@ -154,6 +140,7 @@ async function initDb() {
   `);
 
   const weather = await pool.query("SELECT COUNT(*)::int AS count FROM weather_forecasts");
+
   if (weather.rows[0].count === 0) {
     await pool.query(`
       INSERT INTO weather_forecasts (airport, valid_from, valid_to, summary, wind, visibility, ceiling, risk) VALUES
@@ -246,7 +233,6 @@ const typeDefs = `#graphql
   type Mutation {
     login(callsign: String!, password: String!): String!
     loginSession(callsign: String!, password: String!): Session!
-    register(callsign: String!, password: String!, displayName: String, email: String): Session!
     updateFlightStatus(id: ID!, status: String!): Flight!
     updateFlightPosition(flightNo: String!, latitude: Float!, longitude: Float!, altitude: Int, heading: Int, speed: Int, verticalRate: Int, status: String): Flight!
     uploadReport(filename: String!, content: String!): String!
@@ -255,24 +241,36 @@ const typeDefs = `#graphql
 
 const resolvers = {
   Query: {
-    flights: async (_, { search = "" }, { req }) => {
+    flights: async (_, { search = "" }, { req, auth }) => {
+      requireAuth(auth);
+
       // LAB VULN: SQL injection by design for blue-team detection.
       const sql = `SELECT * FROM flights WHERE flight_no ILIKE '%${search}%' OR origin ILIKE '%${search}%' ORDER BY id`;
       requestLog(req, "flight.search", { search, sql });
+
       const { rows } = await pool.query(sql);
       return rows.map(mapFlight);
     },
-    flight: async (_, { id }, { req }) => {
+
+    flight: async (_, { id }, { req, auth }) => {
+      requireAuth(auth);
+
       requestLog(req, "flight.read", { flightId: id });
+
       const { rows } = await pool.query("SELECT * FROM flights WHERE id = $1", [id]);
       return rows[0] ? mapFlight(rows[0]) : null;
     },
-    currentOperator: async (_, __, { req }) => {
-      return await findOperator(actorFromRequest(req));
+
+    currentOperator: async (_, __, { auth }) => {
+      return requireAuth(auth).operator;
     },
-    clearances: async (_, { search = "" }, { req }) => {
+
+    clearances: async (_, { search = "" }, { req, auth }) => {
+      requireAuth(auth);
+
       // LAB VULN: shared operational list exposes clearance metadata broadly.
       requestLog(req, "clearance.search", { search, warning: "broad-clearance-list" });
+
       const { rows } = await pool.query(
         `SELECT c.*, f.flight_no, f.origin, f.destination, f.status
          FROM clearances c
@@ -281,11 +279,16 @@ const resolvers = {
          ORDER BY c.id`,
         [`%${search}%`]
       );
+
       return rows.map(mapClearance);
     },
-    clearance: async (_, { id }, { req }) => {
+
+    clearance: async (_, { id }, { req, auth }) => {
+      requireAuth(auth);
+
       // LAB VULN: IDOR. No authorization check on clearance ownership.
       requestLog(req, "clearance.read", { clearanceId: id, warning: "idor_lab_endpoint" });
+
       const { rows } = await pool.query(
         `SELECT c.*, f.flight_no, f.origin, f.destination, f.status
          FROM clearances c
@@ -293,115 +296,217 @@ const resolvers = {
          WHERE c.id = $1`,
         [id]
       );
+
       return rows[0] ? mapClearance(rows[0]) : null;
     },
-    s3Objects: async (_, { prefix = "" }, { req }) => {
+
+    s3Objects: async (_, { prefix = "" }, { req, auth }) => {
+      requireAuth(auth);
+
       requestLog(req, "s3.list", { bucket: s3Bucket, prefix });
+
       const result = await s3.send(new ListObjectsV2Command({ Bucket: s3Bucket, Prefix: prefix }));
       return (result.Contents || []).map((item) => ({ key: item.Key, size: item.Size || 0 }));
     },
-    weatherForecast: async (_, { airport = "", hours = 12 }, { req }) => {
+
+    weatherForecast: async (_, { airport = "", hours = 12 }, { req, auth }) => {
+      requireAuth(auth);
+
       const normalized = airport.trim().toUpperCase();
       requestLog(req, "weather.forecast", { airport: normalized || "*", hours });
+
       const params = [Math.max(1, Math.min(Number(hours) || 12, 48))];
       let where = "valid_from <= now() + ($1::int * interval '1 hour')";
+
       if (normalized) {
         params.push(normalized);
         where += " AND airport = $2";
       }
+
       const { rows } = await pool.query(
         `SELECT * FROM weather_forecasts WHERE ${where} ORDER BY airport, valid_from`,
         params
       );
+
       return rows.map(mapWeatherForecast);
     },
-    fetchMetar: async (_, { url }, { req }) => {
+
+    fetchMetar: async (_, { url }, { req, auth }) => {
+      requireAuth(auth);
+
       // LAB VULN: SSRF-style URL fetcher for investigation scenarios.
       requestLog(req, "weather.fetch", { url, warning: "ssrf_lab_endpoint" });
+
       const response = await fetch(url, { signal: AbortSignal.timeout(3000) });
       return await response.text();
     }
   },
+
   Mutation: {
     login: async (_, { callsign, password }, { req }) => {
       return (await loginOperator(callsign, password, req)).token;
     },
+
     loginSession: async (_, { callsign, password }, { req }) => {
       return await loginOperator(callsign, password, req);
     },
-    register: async (_, { callsign, password, displayName = "", email = "" }, { req }) => {
-      const normalized = callsign.toLowerCase().replace(/[^a-z0-9-]/g, "");
-      if (normalized.length < 3) throw new Error("callsign too short");
-      if (password.length < 6) throw new Error("password too short");
+
+    updateFlightStatus: async (_, { id, status }, { req, auth }) => {
+      requireAuth(auth);
+
+      requestLog(req, "flight.status.update", { flightId: id, status });
+
       const { rows } = await pool.query(
-        `INSERT INTO operators (callsign, role, password, display_name, email)
-         VALUES ($1, 'viewer', $2, $3, $4)
-         RETURNING *`,
-        [normalized, password, displayName || normalized, email || `${normalized}@self.local`]
+        "UPDATE flights SET status = $1 WHERE id = $2 RETURNING *",
+        [status, id]
       );
-      requestLog(req, "auth.register", { callsign: normalized, role: "viewer", warning: "self_service_viewer_lab" });
-      return await createSession(rows[0]);
-    },
-    updateFlightStatus: async (_, { id, status }, { req }) => {
-      // LAB VULN: weak auth. Any caller with x-operator can update operational state.
-      requestLog(req, "flight.status.update", { flightId: id, status, token: req.headers.authorization || null });
-      const { rows } = await pool.query("UPDATE flights SET status = $1 WHERE id = $2 RETURNING *", [status, id]);
+
       if (!rows[0]) throw new Error("flight not found");
       return mapFlight(rows[0]);
     },
-    updateFlightPosition: async (_, args, { req }) => {
-      return await updateFlightPosition(args, req, "graphql");
+
+    updateFlightPosition: async (_, args, { req, auth }) => {
+      requireAuth(auth);
+      return await updateFlightPosition(args, req, auth, "graphql");
     },
-    uploadReport: async (_, { filename, content }, { req }) => {
+
+    uploadReport: async (_, { filename, content }, { req, auth }) => {
+      requireAuth(auth);
+
       // LAB VULN: no file type validation and predictable object path.
       const key = `reports/${filename}`;
       requestLog(req, "s3.upload", { bucket: s3Bucket, key, bytes: content.length });
+
       await s3.send(new PutObjectCommand({ Bucket: s3Bucket, Key: key, Body: content }));
       return key;
     }
   }
 };
 
-async function loginOperator(callsign, password, req) {
-  const { rows } = await pool.query("SELECT * FROM operators WHERE callsign = $1 AND password = $2", [callsign, password]);
-  const ok = rows.length > 0;
-  requestLog(req, "auth.login", { callsign, ok });
-  if (!ok) throw new Error("invalid credentials");
-  return await createSession(rows[0]);
+async function loginOperator(username, password, req) {
+  const body = new URLSearchParams();
+  body.set("grant_type", "password");
+  body.set("client_id", keycloakClientId);
+  body.set("client_secret", keycloakClientSecret);
+  body.set("username", username);
+  body.set("password", password);
+
+  const response = await fetch(keycloakTokenEndpoint(), {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  const ok = response.ok && payload.access_token;
+
+  requestLog(req, "auth.login", { username, ok });
+
+  if (!ok) {
+    throw new Error("invalid credentials");
+  }
+
+  const claims = decodeJwt(payload.access_token);
+
+  return {
+    token: payload.access_token,
+    operator: operatorFromClaims(claims)
+  };
 }
 
-async function createSession(row) {
-  const token = Buffer.from(`${row.callsign}:${row.role}:${adminToken}`).toString("base64");
-  await redis.set(`session:${row.callsign}`, token, "EX", 3600);
-  return { token, operator: mapOperator(row) };
-}
-
-function actorFromRequest(req) {
+async function authenticateRequest(req) {
   const bearer = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-  if (bearer) {
-    try {
-      return Buffer.from(bearer, "base64").toString("utf8").split(":")[0] || "anonymous";
-    } catch {
-      return "anonymous";
+
+  if (!bearer) {
+    return null;
+  }
+
+  const body = new URLSearchParams();
+  body.set("client_id", keycloakClientId);
+  body.set("client_secret", keycloakClientSecret);
+  body.set("token", bearer);
+
+  const response = await fetch(keycloakIntrospectionEndpoint(), {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const introspection = await response.json().catch(() => ({}));
+
+  if (!introspection.active) {
+    return null;
+  }
+
+  const claims = decodeJwt(bearer);
+
+  return {
+    token: bearer,
+    claims,
+    operator: operatorFromClaims(claims)
+  };
+}
+
+function requireAuth(auth) {
+  if (!auth) {
+    throw new Error("unauthorized");
+  }
+
+  return auth;
+}
+
+function decodeJwt(token) {
+  const [, payload] = token.split(".");
+
+  if (!payload) {
+    return {};
+  }
+
+  const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
+
+  try {
+    return JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function operatorFromClaims(claims) {
+  const username = claims.preferred_username || claims.username || claims.sub || "anonymous";
+
+  return {
+    callsign: claims.callsign || username,
+    displayName: claims.name || username,
+    email: claims.email || "",
+    role: extractRole(claims)
+  };
+}
+
+function extractRole(claims) {
+  if (Array.isArray(claims.role)) {
+    return claims.role[0] || "viewer";
+  }
+
+  if (typeof claims.role === "string") {
+    return claims.role;
+  }
+
+  const realmRoles = claims.realm_access?.roles || [];
+  const appRoles = claims.resource_access?.[keycloakClientId]?.roles || [];
+  const roles = [...appRoles, ...realmRoles];
+
+  for (const wanted of ["admin", "controller", "analyst", "viewer"]) {
+    if (roles.includes(wanted)) {
+      return wanted;
     }
   }
-  // LAB VULN: callers can impersonate an operator by setting x-operator.
-  return req.headers["x-operator"] || "anonymous";
-}
 
-async function findOperator(callsign) {
-  const { rows } = await pool.query("SELECT * FROM operators WHERE callsign = $1", [callsign]);
-  if (rows[0]) return mapOperator(rows[0]);
-  return { callsign, displayName: callsign, email: "", role: "anonymous" };
-}
-
-function mapOperator(row) {
-  return {
-    callsign: row.callsign,
-    displayName: row.display_name || row.callsign,
-    email: row.email || "",
-    role: row.role
-  };
+  return "viewer";
 }
 
 function mapFlight(row) {
@@ -454,9 +559,15 @@ function mapWeatherForecast(row) {
   };
 }
 
-async function updateFlightPosition({ flightNo, latitude, longitude, altitude = null, heading = null, speed = null, verticalRate = null, status = null }, req, source) {
-  // LAB VULN: telemetry accepts weak bearer token or spoofable x-operator header.
-  const actor = actorFromRequest(req);
+async function updateFlightPosition(
+  { flightNo, latitude, longitude, altitude = null, heading = null, speed = null, verticalRate = null, status = null },
+  req,
+  auth,
+  source
+) {
+  // LAB VULN remains business-side: telemetry can be updated by any authenticated user.
+  const actor = auth.operator.callsign;
+
   requestLog(req, "flight.position.update", {
     source,
     flightNo,
@@ -467,9 +578,9 @@ async function updateFlightPosition({ flightNo, latitude, longitude, altitude = 
     heading,
     speed,
     verticalRate,
-    status,
-    warning: "weak-telemetry-auth"
+    status
   });
+
   const { rows } = await pool.query(
     `UPDATE flights
      SET latitude = $2,
@@ -484,18 +595,26 @@ async function updateFlightPosition({ flightNo, latitude, longitude, altitude = 
      RETURNING *`,
     [flightNo.toUpperCase(), latitude, longitude, altitude, heading, speed, verticalRate, status]
   );
+
   if (!rows[0]) throw new Error("flight not found");
-  await redis.set(`telemetry:${flightNo.toUpperCase()}:last`, JSON.stringify({
-    actor,
-    latitude,
-    longitude,
-    altitude,
-    heading,
-    speed,
-    verticalRate,
-    status,
-    ts: new Date().toISOString()
-  }), "EX", 600);
+
+  await redis.set(
+    `telemetry:${flightNo.toUpperCase()}:last`,
+    JSON.stringify({
+      actor,
+      latitude,
+      longitude,
+      altitude,
+      heading,
+      speed,
+      verticalRate,
+      status,
+      ts: new Date().toISOString()
+    }),
+    "EX",
+    600
+  );
+
   return mapFlight(rows[0]);
 }
 
@@ -506,13 +625,25 @@ async function main() {
   app.use(cors());
   app.use(express.json({ limit: "2mb" }));
 
+  app.use(async (req, _res, next) => {
+    try {
+      req.auth = await authenticateRequest(req);
+    } catch {
+      req.auth = null;
+    }
+
+    next();
+  });
+
   app.get("/healthz", (_, res) => res.json({ ok: true }));
+
   app.get("/api/footer", (_, res) => res.json({
     service: "AirOps API",
     stack: "GraphQL / Telemetry / Operational Data",
     environment: "Training Control Network",
     version: "0.1.0"
   }));
+
   app.get("/readyz", async (_, res) => {
     await pool.query("SELECT 1");
     await redis.ping();
@@ -521,16 +652,24 @@ async function main() {
 
   app.post("/api/flights/:flightNo/position", async (req, res) => {
     try {
-      const result = await updateFlightPosition({ flightNo: req.params.flightNo, ...req.body }, req, "rest");
+      const auth = requireAuth(req.auth);
+      const result = await updateFlightPosition({ flightNo: req.params.flightNo, ...req.body }, req, auth, "rest");
       res.json({ ok: true, flight: result });
     } catch (error) {
-      res.status(error.message === "flight not found" ? 404 : 400).json({ ok: false, error: error.message });
+      const statusCode = error.message === "unauthorized" ? 401 : error.message === "flight not found" ? 404 : 400;
+      res.status(statusCode).json({ ok: false, error: error.message });
     }
   });
 
   const apollo = new ApolloServer({ typeDefs, resolvers, introspection: true });
   await apollo.start();
-  app.use("/graphql", expressMiddleware(apollo, { context: async ({ req }) => ({ req }) }));
+
+  app.use(
+    "/graphql",
+    expressMiddleware(apollo, {
+      context: async ({ req }) => ({ req, auth: req.auth })
+    })
+  );
 
   app.listen(port, "0.0.0.0", () => {
     console.log(JSON.stringify({ ts: new Date().toISOString(), service: "airops-api", event: "server.start", port }));

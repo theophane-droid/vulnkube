@@ -32,6 +32,10 @@ keycloak:
   service:
     port: 8080
 
+  realm: airops
+  clientId: airops-backend
+  clientSecret: airops-backend-secret-change-me
+
 ingress:
   enabled: true
   className: traefik
