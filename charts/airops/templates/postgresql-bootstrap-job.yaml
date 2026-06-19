@@ -43,6 +43,15 @@ spec:
                   name: {{ include "airops.fullname" . }}-secrets
                   key: keycloak-db-password
 
+            - name: BS_DB_NAME
+              value: {{ .Values.bookstack.db.database | quote }}
+            - name: BS_DB_USER
+              value: {{ .Values.bookstack.db.username | quote }}
+            - name: BS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "airops.fullname" . }}-secrets
+                  key: bookstack-db-password
           command:
             - /bin/sh
             - -c
@@ -78,6 +87,33 @@ spec:
               psql -d "$KC_DB_NAME" -v ON_ERROR_STOP=1 <<SQL
               GRANT ALL PRIVILEGES ON DATABASE ${KC_DB_NAME} TO ${KC_DB_USER};
               GRANT ALL ON SCHEMA public TO ${KC_DB_USER};
+              SQL
+
+
+              echo "Creating Bookstack role if missing..."
+              psql -v ON_ERROR_STOP=1 <<SQL
+              DO \$\$
+              BEGIN
+                IF NOT EXISTS (
+                  SELECT FROM pg_catalog.pg_roles WHERE rolname = '${BS_DB_USER}'
+                ) THEN
+                  CREATE ROLE ${BS_DB_USER} LOGIN PASSWORD '${BS_DB_PASSWORD}';
+                END IF;
+              END
+              \$\$;
+              SQL
+
+              echo "Creating Bookstack database if missing..."
+              DB_EXISTS="$(psql -tAc "SELECT 1 FROM pg_database WHERE datname='${BS_DB_NAME}'")"
+
+              if [ "$DB_EXISTS" != "1" ]; then
+                createdb -O "$BS_DB_USER" "$BS_DB_NAME"
+              fi
+
+              echo "Granting privileges..."
+              psql -d "$BS_DB_NAME" -v ON_ERROR_STOP=1 <<SQL
+              GRANT ALL PRIVILEGES ON DATABASE ${BS_DB_NAME} TO ${BS_DB_USER};
+              GRANT ALL ON SCHEMA public TO ${BS_DB_USER};
               SQL
 
               echo "Bootstrap done."

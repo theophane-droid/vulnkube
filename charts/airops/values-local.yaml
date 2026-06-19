@@ -42,3 +42,16 @@ ingress:
   className: traefik
   path: /
   annotations: {}
+
+bookstack:
+  appKey: "base64:7N5PrQg2rgg5kxQq47lmOhcOiA+qnOs7coHGuhuMATc="
+  ingresPath: "bookstack"
+  service:
+    port: 80
+  db:
+    username: bookstack
+    password: "C2Xe8PykNH8VojW9P9aIOnbbKp49j5MD"
+    database: bookstack
+  mysql:
+    persistence:
+      size: 5Gi

@@ -30,6 +30,7 @@ spec:
                 name: {{ include "airops.fullname" . }}-keycloak
                 port:
                   number: {{ .Values.keycloak.service.port }}
+
 ---
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
@@ -59,3 +60,32 @@ spec:
                 name: {{ include "airops.fullname" . }}-minio
                 port:
                   name: console
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ include "airops.fullname" . }}-bookstack-strip
+spec:
+  stripPrefix:
+    prefixes:
+      - /bookstack
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "airops.fullname" . }}-bookstack
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-{{ include "airops.fullname" . }}-bookstack-strip@kubernetescrd
+spec:
+  ingressClassName: {{ .Values.ingress.className | default "traefik" | quote }}
+  rules:
+    - http:
+        paths:
+          - path: /bookstack
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "airops.fullname" . }}-bookstack
+                port:
+                  name: bookstack

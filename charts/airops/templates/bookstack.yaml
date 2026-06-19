@@ -1,0 +1,237 @@
+# -----------------------------------------------------------------------------
+# MySQL Service
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "airops.fullname" . }}-bookstack-mysql
+  labels:
+    {{- include "airops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bookstack-mysql
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "airops.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: bookstack-mysql
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: mysql
+
+---
+# -----------------------------------------------------------------------------
+# MySQL StatefulSet
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "airops.fullname" . }}-bookstack-mysql
+  labels:
+    {{- include "airops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bookstack-mysql
+spec:
+  serviceName: {{ include "airops.fullname" . }}-bookstack-mysql
+  replicas: 1
+
+  selector:
+    matchLabels:
+      {{- include "airops.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: bookstack-mysql
+
+  template:
+    metadata:
+      labels:
+        {{- include "airops.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: bookstack-mysql
+
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.4
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: mysql
+              containerPort: 3306
+
+          env:
+            - name: MYSQL_DATABASE
+              value: bookstack
+
+            - name: MYSQL_USER
+              value: bookstack
+
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "airops.fullname" . }}-secrets
+                  key: bookstack-db-password
+
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "airops.fullname" . }}-secrets
+                  key: bookstack-db-root-password
+
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -ec
+                - >
+                  mysqladmin ping
+                  --host=127.0.0.1
+                  --user=root
+                  --password="${MYSQL_ROOT_PASSWORD}"
+                  --silent
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12
+
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /var/lib/mysql
+
+  volumeClaimTemplates:
+    - metadata:
+        name: mysql-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.bookstack.mysql.persistence.size | quote }}
+
+---
+# -----------------------------------------------------------------------------
+# BookStack StatefulSet
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "airops.fullname" . }}-bookstack
+  labels:
+    {{- include "airops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bookstack
+
+spec:
+  serviceName: {{ include "airops.fullname" . }}-bookstack
+  replicas: 1
+
+  selector:
+    matchLabels:
+      {{- include "airops.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: bookstack
+
+  template:
+    metadata:
+      labels:
+        {{- include "airops.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: bookstack
+
+    spec:
+      initContainers:
+        - name: wait-for-mysql
+          image: busybox:1.36
+          command:
+            - sh
+            - -ec
+            - |
+              until nc -z "${MYSQL_HOST}" 3306; do
+                echo "Waiting for MySQL..."
+                sleep 2
+              done
+          env:
+            - name: MYSQL_HOST
+              value: {{ include "airops.fullname" . }}-bookstack-mysql
+
+      containers:
+        - name: bookstack
+          image: lscr.io/linuxserver/bookstack:latest
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - containerPort: 80
+              name: bookstack
+
+          env:
+            - name: APP_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "airops.fullname" . }}-secrets
+                  key: bookstack-app-key
+
+            - name: PUID
+              value: "1000"
+
+            - name: PGID
+              value: "1000"
+
+            - name: TZ
+              value: Etc/UTC
+
+            - name: DB_HOST
+              value: {{ include "airops.fullname" . }}-bookstack-mysql
+
+            - name: DB_PORT
+              value: "3306"
+
+            - name: DB_USERNAME
+              value: bookstack
+
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "airops.fullname" . }}-secrets
+                  key: bookstack-db-password
+
+            - name: DB_DATABASE
+              value: bookstack
+
+            - name: APP_DEFAULT_DARK_MODE
+              value: "true"
+
+            - name: APP_URL
+              value: http://{{ .Values.global.hostname }}/bookstack
+
+          # startupProbe:
+          #   httpGet:
+          #     path: /bookstack
+          #     port: bookstack
+          #   periodSeconds: 5
+          #   failureThreshold: 30
+
+          # readinessProbe:
+          #   httpGet:
+          #     path: /bookstack
+          #     port: bookstack
+          #   periodSeconds: 10
+
+          readinessProbe:
+            tcpSocket:
+              port: bookstack
+            periodSeconds: 10
+
+---
+# -----------------------------------------------------------------------------
+# BookStack Service
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "airops.fullname" . }}-bookstack
+  labels:
+    {{- include "airops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bookstack
+
+spec:
+  selector:
+    {{- include "airops.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: bookstack
+
+  ports:
+    - name: bookstack
+      port: {{ .Values.bookstack.service.port }}
+      targetPort: bookstack
